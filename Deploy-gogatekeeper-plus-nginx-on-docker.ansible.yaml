@@ -1,0 +1,104 @@
+- name: "Deploy gogatekeeper and nginx on docker"
+  hosts: all
+  gather_facts: true
+  vars:
+    linux_user: "app-user"
+    linux_pass: "CHANGE_ME"
+    workdir: "/opt/gogatekeeper-plus-nginx"
+
+  tasks:
+    - name: "Install dependent packages to Ubuntu"
+      ansible.builtin.include_tasks: tasks/Install-dependent-packages-to-ubuntu.ansible.yaml
+      when: ansible_distribution == "Ubuntu"
+
+    - name: "Install dependent packages to CentOS"
+      ansible.builtin.include_tasks: tasks/Install-dependent-packages-to-centos.ansible.yaml
+      when: ansible_distribution == "CentOS"
+
+    - name: "Create linux user"
+      become: true
+      ansible.builtin.user:
+        name: "{{ linux_user }}"
+        shell: "/bin/bash"
+        groups: "docker"
+        state: present
+        password: "{{ linux_pass | password_hash('sha512') }}"
+
+    - name: "Create workdir"
+      become: true
+      ansible.builtin.file:
+        path: "{{ workdir }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ linux_user }}"
+        group: "{{ linux_user }}"
+
+    - name: "Copy specific files to the target host"
+      become: true
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ workdir }}/{{ item | basename }}"
+        owner: "{{ linux_user }}"
+        group: "{{ linux_user }}"
+        mode: '0600'
+      loop:
+        - ".env"
+        - "docker-compose.yml"
+
+    - name: "Copy all files from nginx-files directory to the target host"
+      become: true
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ workdir }}/nginx-files/"
+        owner: "{{ linux_user }}"
+        group: "{{ linux_user }}"
+        mode: '0644'
+      with_fileglob:
+        - "nginx-files/*"
+
+    - name: "Read .env file"
+      ansible.builtin.slurp:
+        src: files/.env
+      delegate_to: localhost
+      register: slurped_file
+
+    - name: "Set fact with decoded content"
+      ansible.builtin.set_fact:
+        file_content: "{{ slurped_file.content | b64decode }}"
+
+    - name: "Parse environment variables into a dictionary"
+      ansible.builtin.set_fact:
+        env_vars: "{{ env_vars | default({}) | combine({item.split('=')[0]: item.split('=')[1]}) }}"
+      loop: "{{ file_content.splitlines() }}"
+      when: item is search('=')
+
+    - name: "Set nginx image"
+      ansible.builtin.set_fact:
+        nginx_image: "{{ env_vars.NGINX_IMAGE }}"
+
+    - name: "Debug keycloak image"
+      ansible.builtin.debug:
+        msg: "Keycloak image is: {{ nginx_image }}"
+
+    - name: "Set gogatekeeper image"
+      ansible.builtin.set_fact:
+        gogatekeeper_image: "{{ env_vars.GOGATEKEEPER_IMAGE }}"
+
+    - name: "Debug postgres image"
+      ansible.builtin.debug:
+        msg: "Postgres image is: {{ gogatekeeper_image }}"
+
+    - name: "Pulling required docker images"
+      become: true
+      community.docker.docker_image:
+        name: "{{ item }}"
+        source: pull
+      with_items:
+        - "{{ nginx_image }}"
+        - "{{ gogatekeeper_image }}"
+
+    - name: Start services
+      become: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ workdir }}"
+        state: present

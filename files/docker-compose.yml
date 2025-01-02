@@ -1,0 +1,47 @@
+services:
+  nginx-proxy:
+    image: ${NGINX_IMAGE}
+    hostname: ${NGINX_HOSTNAME}
+    container_name: ${NGINX_CONTAINER_NAME}
+    environment:
+      TZ: ${TIMEZONE}
+    volumes:
+      - ./nginx-files/index.html:/usr/share/nginx/html/index.html
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  gogatekeeper:
+    image: ${GOGATEKEEPER_IMAGE}
+    hostname: ${GOGATEKEEPER_HOSTNAME}
+    container_name: ${GOGATEKEEPER_CONTAINER_NAME}
+    environment:
+      TZ: ${TIMEZONE}
+    ports:
+      - "80:80"
+    depends_on:
+      - nginx-proxy
+    networks:
+      - app-network
+    command: [
+        "--discovery-url=${DISCOVERY_URL}",
+        "--client-id=${CLIENT_ID}",
+        "--client-secret=${CLIENT_SECRET}",
+        "--listen=${LISTEN}",
+        "--enable-logging=${ENABLE_LOGGING}",
+        "--enable-json-logging=${ENABLE_JSON_LOGGING}",
+        "--upstream-url=http://nginx-proxy:80",
+        "--redirection-url=${REDIRECTION_URL}",
+        "--enable-refresh-tokens=${ENABLE_REFRESH_TOKENS}",
+        "--enable-session-cookies=${ENABLE_SESSION_COOKIES}",
+        "--verbose",
+        "--enable-default-deny=${ENABLE_DEFAULT_DENY}",
+        "--resources=${RESOURCES}",
+        "--encryption-key=${ENCRYPTION_KEY}",
+        "--secure-cookie=${SECURE_COOKIE}",
+        "--cors-origins=${CORS_ORIGINS}"
+      ]
+    restart: unless-stopped
+
+networks:
+  app-network:
